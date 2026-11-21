@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // غيّر قائمة البريدين إلى بريديك وبريد شريكك قبل النشر.
+    function isTeamMember() {
+      return request.auth != null &&
+        request.auth.token.email in [
+          "YOUR_EMAIL@example.com",
+          "PARTNER_EMAIL@example.com"
+        ];
+    }
+    match /workspaces/COVIX/{collection}/{docId} {
+      allow read, write: if isTeamMember();
+    }
+  }
+}

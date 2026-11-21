@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#171717"><meta name="description" content="COVIX - إدارة مشروع إكسسوارات الموبايل">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<title>COVIX Management</title>
+</head>
+<body>
+<div id="login" class="login-wrap">
+  <div class="brand">COVI<span>X</span></div><p class="muted">BUSINESS MANAGEMENT</p>
+  <div class="panel login-panel">
+    <h2>تسجيل الدخول</h2>
+    <label>البريد الإلكتروني<input id="email" type="email" placeholder="name@example.com" autocomplete="username"></label>
+    <label>كلمة المرور<input id="password" type="password" placeholder="كلمة المرور" autocomplete="current-password"></label>
+    <button id="loginBtn" class="primary">دخول</button>
+    <p id="loginMsg" class="muted small">استخدم الحساب الذي أضافه مدير المشروع.</p>
+  </div>
+</div>
+<div id="app" class="hidden">
+<header><div><div class="brand smallbrand">COVI<span>X</span></div><div class="muted tiny">إدارة مشروعك بذكاء</div></div><button id="logoutBtn" class="ghost">خروج</button></header>
+<main>
+<section id="dashboard" class="page active">
+  <div class="hello"><div><div class="eyebrow">لوحة التحكم</div><h1>أهلاً بك في COVIX</h1></div><div class="live-dot">● متصل</div></div>
+  <div class="stats">
+    <article class="stat"><span>مبيعات مستلمة</span><strong id="totalSales">0 ج</strong></article>
+    <article class="stat"><span>صافي الربح التقديري</span><strong id="netProfit">0 ج</strong></article>
+    <article class="stat"><span>الطلبات المستلمة</span><strong id="ordersCount">0</strong></article>
+    <article class="stat"><span>قيمة المخزون</span><strong id="stockValue">0 ج</strong></article>
+  </div>
+  <div class="panel"><div class="section-head"><h3>ملخص سريع</h3><span class="muted tiny">يتحدث تلقائياً</span></div><div id="quickSummary" class="summary">أضف منتجاتك ثم سجّل أول عملية بيع.</div></div>
+  <div class="panel"><div class="section-head"><h3>تنبيهات المخزون</h3></div><div id="lowStock" class="summary muted">لا توجد تنبيهات.</div></div>
+</section>
+<section id="products" class="page">
+  <div class="page-title"><div><div class="eyebrow">إدارة المخزون</div><h1>المنتجات</h1></div><button class="primary" id="addProductBtn">＋ إضافة</button></div>
+  <div id="productsList" class="list"></div>
+</section>
+<section id="sales" class="page">
+  <div class="page-title"><div><div class="eyebrow">الطلبات والعملاء</div><h1>المبيعات</h1></div><button class="primary" id="addSaleBtn">＋ طلب جديد</button></div>
+  <div id="salesList" class="list"></div>
+</section>
+<section id="expenses" class="page">
+  <div class="page-title"><div><div class="eyebrow">المصاريف التشغيلية</div><h1>المصروفات</h1></div><button class="primary" id="addExpenseBtn">＋ إضافة</button></div>
+  <div id="expensesList" class="list"></div>
+</section>
+<section id="team" class="page">
+  <div class="eyebrow">مساحة العمل المشتركة</div><h1>الفريق والبيانات</h1>
+  <div class="panel"><h3>مزامنة بينك وبين شريكك</h3><p class="muted">عند دخولكما بنفس مشروع Firebase، المنتجات والطلبات والمصروفات تظهر للطرفين وتتحدث عبر الإنترنت.</p><div class="sync">☁️ المزامنة السحابية مفعّلة بعد إعداد Firebase</div></div>
+  <div class="panel"><h3>ملاحظات التشغيل</h3><ul class="notes"><li>سجّل الطلب بعد تأكيده.</li><li>غيّر الحالة إلى «تم التسليم» بعد استلام العميل فقط.</li><li>المبيعات والربح المحسوبان في لوحة التحكم يعتمدان على الطلبات المسلّمة.</li><li>استخدم بيانات دخول منفصلة لكل شريك.</li></ul></div>
+</section>
+</main>
+<nav class="bottom-nav">
+<button data-page="dashboard" class="navbtn selected"><b>⌂</b><span>الرئيسية</span></button>
+<button data-page="products" class="navbtn"><b>▦</b><span>المخزون</span></button>
+<button data-page="sales" class="navbtn"><b>🛒</b><span>المبيعات</span></button>
+<button data-page="expenses" class="navbtn"><b>＋</b><span>المصروفات</span></button>
+<button data-page="team" class="navbtn"><b>♙</b><span>الفريق</span></button>
+</nav>
+</div>
+<div id="modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><h3 id="modalTitle">إضافة</h3><button id="closeModal" class="ghost">✕</button></div><form id="modalForm"></form></div></div>
+<div id="toast" class="toast"></div>
+<script type="module" src="app.js"></script>
+</body></html>
