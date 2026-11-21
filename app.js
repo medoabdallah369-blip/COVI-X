@@ -3,13 +3,14 @@ import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 /* ضع إعدادات مشروع Firebase هنا بعد إنشائه. لا تضع مفاتيح خاصة أو كلمات مرور في هذا الملف. */
-const firebaseConfig = {
-  apiKey: "ADD_FIREBASE_API_KEY",
-  authDomain: "ADD_PROJECT.firebaseapp.com",
-  projectId: "ADD_PROJECT_ID",
-  storageBucket: "ADD_PROJECT.appspot.com",
-  messagingSenderId: "ADD_SENDER_ID",
-  appId: "ADD_APP_ID"
+  const firebaseConfig = {
+  apiKey: "AIzaSyB9Lq_LhCYezEb_JiVPDHXmyZZvQ_jOdWo",
+  authDomain: "covi-x.firebaseapp.com",
+  projectId: "covi-x",
+  storageBucket: "covi-x.firebasestorage.app",
+  messagingSenderId: "347535108348",
+  appId: "1:347535108348:web:083a472b12e7b827c44f79",
+  measurementId: "G-R78D64XJM0"
 };
 const configured = !Object.values(firebaseConfig).some(v => String(v).startsWith("ADD_"));
 let auth, db, currentUser;
