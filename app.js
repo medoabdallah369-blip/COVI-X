@@ -822,19 +822,23 @@ function startSubscriptions() {
 // Navigation and events
 // --------------------
 
+
 function setupNavigation() {
   document.querySelectorAll("[data-page]").forEach(button => {
     button.addEventListener("click", () => {
       const page = button.dataset.page;
-      document.querySelectorAll("[data-page]").forEach(item =>
-        item.classList.toggle("active", item === button)
-      );
+
+      document.querySelectorAll("[data-page]").forEach(item => {
+        item.classList.toggle("selected", item === button);
+      });
+
       document.querySelectorAll(".page").forEach(section => {
-        section.classList.toggle("hidden", section.id !== page);
+        section.classList.toggle("active", section.id === page);
       });
     });
   });
 }
+
 
 function setupEvents() {
   $("loginBtn")?.addEventListener("click", async () => {
