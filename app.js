@@ -748,4 +748,359 @@ function openPurchaseForm() {
           });
         }
 
-        // Cr
+        
+        // Create new products.
+        let newProductIndex = 0;
+
+        for (const item of items) {
+          if (!item.isNewProduct) {
+            finalItems.push(item);
+            continue;
+          }
+
+          const newData = newProducts[newProductIndex++];
+          const newProductRef = doc(getCollection("products"));
+
+          transaction.set(newProductRef, {
+            name: newData.name,
+            code: newData.code,
+            category: newData.category,
+            salePrice: newData.salePrice,
+            purchasePrice: newData.unitCost,
+            stock: newData.qty,
+            minStock: 5,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+
+          finalItems.push({
+            ...item,
+            productId: newProductRef.id
+          });
+        }
+
+        // Save purchase invoice.
+        const purchaseRef = doc(getCollection("purchases"));
+
+        transaction.set(purchaseRef, {
+          supplierName,
+          date,
+          items: finalItems,
+          total,
+          paymentStatus: "مدفوع بالكامل",
+          createdAt: serverTimestamp(),
+          createdBy: currentUser.uid
+        });
+      });
+
+      closeModal();
+      toast("تم حفظ فاتورة المشتريات وتحديث المخزون بنجاح");
+    }
+  );
+
+  addPurchaseRow();
+}
+
+// --------------------
+// Dashboard
+// --------------------
+
+function renderDashboard() {
+  const totalSales = sales.reduce((sum, item) => sum + number(item.total), 0);
+  const deliveredSales = sales.filter(item => item.status === "تم التسليم");
+
+  const totalProfit = deliveredSales.reduce(
+    (sum, item) => sum + number(item.profit),
+    0
+  );
+
+  const totalExpenses = expenses.reduce(
+    (sum, item) => sum + number(item.amount),
+    0
+  );
+
+  const stockValue = products.reduce(
+    (sum, item) => sum + number(item.stock) * number(item.purchasePrice),
+    0
+  );
+
+  const netProfit = totalProfit - totalExpenses;
+
+  if ($("totalSales")) $("totalSales").textContent = money(totalSales);
+  if ($("netProfit")) $("netProfit").textContent = money(netProfit);
+  if ($("ordersCount")) $("ordersCount").textContent = sales.length;
+  if ($("stockValue")) $("stockValue").textContent = money(stockValue);
+
+  if ($("quickSummary")) {
+    $("quickSummary").innerHTML = `
+      <div>إجمالي المبيعات: ${money(totalSales)}</div>
+      <div>إجمالي المصروفات: ${money(totalExpenses)}</div>
+      <div>صافي الربح التقريبي: ${money(netProfit)}</div>
+      <div>قيمة المخزون: ${money(stockValue)}</div>
+    `;
+  }
+
+  const lowStock = $("lowStock");
+
+  if (lowStock) {
+    const lowProducts = products.filter(
+      item => number(item.stock) <= number(item.minStock)
+    );
+
+    lowStock.innerHTML = lowProducts.length
+      ? lowProducts.map(item => `
+          <div class="item">
+            ${escapeHTML(item.name)}
+            <span class="pill">المتبقي ${number(item.stock)}</span>
+          </div>
+        `).join("")
+      : `<p class="muted">لا توجد منتجات منخفضة المخزون</p>`;
+  }
+}
+
+function renderAll() {
+  renderProducts();
+  renderSales();
+  renderExpenses();
+  renderPurchases();
+  renderDashboard();
+}
+
+// --------------------
+// Firestore subscriptions
+// --------------------
+
+function subscribeToCollection(name, callback) {
+  const q = query(getCollection(name), orderBy("createdAt", "desc"));
+
+  const unsubscribe = onSnapshot(
+    q,
+    snapshot => {
+      callback(snapshot.docs.map(item => ({
+        id: item.id,
+        ...item.data()
+      })));
+
+      renderAll();
+    },
+    error => {
+      console.error(`Error loading ${name}:`, error);
+      toast("حدث خطأ أثناء تحميل البيانات");
+    }
+  );
+
+  unsub.push(unsubscribe);
+}
+
+function subscribe() {
+  unsub.forEach(fn => fn());
+  unsub = [];
+
+  subscribeToCollection("products", data => products = data);
+  subscribeToCollection("sales", data => sales = data);
+  subscribeToCollection("expenses", data => expenses = data);
+  subscribeToCollection("purchases", data => purchases = data);
+}
+
+// --------------------
+// Events
+// --------------------
+
+function setupEvents() {
+  $("loginBtn")?.addEventListener("click", async () => {
+    const email = $("email")?.value.trim();
+    const password = $("password")?.value;
+
+    if (!email || !password) {
+      if ($("loginMsg")) {
+        $("loginMsg").textContent = "اكتب البريد الإلكتروني وكلمة المرور";
+      }
+      return;
+    }
+
+    try {
+      if ($("loginMsg")) $("loginMsg").textContent = "";
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      console.error(error);
+      if ($("loginMsg")) {
+        $("loginMsg").textContent = "بيانات تسجيل الدخول غير صحيحة";
+      }
+    }
+  });
+
+  $("logoutBtn")?.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error(error);
+      toast("تعذر تسجيل الخروج");
+    }
+  });
+
+  $("addProductBtn")?.addEventListener("click", () => openProductForm());
+  $("addSaleBtn")?.addEventListener("click", openSaleForm);
+  $("addExpenseBtn")?.addEventListener("click", openExpenseForm);
+  $("addPurchaseBtn")?.addEventListener("click", openPurchaseForm);
+
+  $("closeModal")?.addEventListener("click", closeModal);
+
+  $("modal")?.addEventListener("click", event => {
+    if (event.target === $("modal")) closeModal();
+  });
+
+  $("productsList")?.addEventListener("click", event => {
+    const editButton = event.target.closest("[data-edit-product]");
+    const deleteButton = event.target.closest("[data-delete-product]");
+
+    if (editButton) {
+      const product = products.find(
+        item => item.id === editButton.dataset.editProduct
+      );
+      if (product) openProductForm(product);
+    }
+
+    if (deleteButton) {
+      deleteProduct(deleteButton.dataset.deleteProduct).catch(error => {
+        console.error(error);
+        toast("تعذر حذف المنتج");
+      });
+    }
+  });
+
+  $("salesList")?.addEventListener("click", async event => {
+    const button = event.target.closest("[data-delete-sale]");
+    if (!button) return;
+
+    if (!confirm("هل تريد حذف سجل البيع؟")) return;
+
+    try {
+      await deleteDoc(getDocument("sales", button.dataset.deleteSale));
+      toast("تم حذف سجل البيع");
+    } catch (error) {
+      console.error(error);
+      toast("تعذر حذف سجل البيع");
+    }
+  });
+
+  $("expensesList")?.addEventListener("click", async event => {
+    const button = event.target.closest("[data-delete-expense]");
+    if (!button) return;
+
+    if (!confirm("هل تريد حذف المصروف؟")) return;
+
+    try {
+      await deleteDoc(getDocument("expenses", button.dataset.deleteExpense));
+      toast("تم حذف المصروف");
+    } catch (error) {
+      console.error(error);
+      toast("تعذر حذف المصروف");
+    }
+  });
+
+  $("modalForm")?.addEventListener("click", event => {
+    if (event.target.id === "addPurchaseRowBtn") {
+      addPurchaseRow();
+    }
+
+    if (event.target.classList.contains("remove-purchase-row")) {
+      event.target.closest(".purchase-row")?.remove();
+      updatePurchaseTotal();
+    }
+  });
+
+  $("modalForm")?.addEventListener("change", event => {
+    if (event.target.classList.contains("purchase-product")) {
+      const row = event.target.closest(".purchase-row");
+      const newFields = row?.querySelector(".purchase-new-product");
+
+      if (newFields) {
+        newFields.classList.toggle(
+          "hidden",
+          event.target.value !== "__new__"
+        );
+
+        const nameInput = newFields.querySelector(".new-product-name");
+        if (nameInput) {
+          nameInput.required = event.target.value === "__new__";
+        }
+
+        const saleInput = newFields.querySelector(".new-product-sale");
+        if (saleInput) {
+          saleInput.required = event.target.value === "__new__";
+        }
+      }
+    }
+  });
+
+  $("modalForm")?.addEventListener("input", event => {
+    if (
+      event.target.classList.contains("purchase-qty") ||
+      event.target.classList.contains("purchase-cost")
+    ) {
+      updatePurchaseTotal();
+    }
+  });
+
+  document.querySelectorAll("[data-page]").forEach(button => {
+    button.addEventListener("click", () => {
+      const page = button.dataset.page;
+
+      document.querySelectorAll("[data-section]").forEach(section => {
+        section.classList.toggle(
+          "hidden",
+          section.dataset.section !== page
+        );
+      });
+
+      document.querySelectorAll("[data-page]").forEach(item => {
+        item.classList.toggle("active", item === button);
+      });
+    });
+  });
+}
+
+// --------------------
+// Start application
+// --------------------
+
+setupEvents();
+showApp(false);
+
+if (configured) {
+  const app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+
+  onAuthStateChanged(auth, user => {
+    currentUser = user;
+
+    if (user) {
+      showApp(true);
+      subscribe();
+    } else {
+      unsub.forEach(fn => fn());
+      unsub = [];
+
+      products = [];
+      sales = [];
+      expenses = [];
+      purchases = [];
+
+      renderAll();
+      showApp(false);
+    }
+  });
+} else {
+  toast("إعدادات Firebase غير مكتملة");
+}
+
+// Register service worker.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(error => {
+      console.log("Service worker registration failed:", error);
+    });
+  });
+      }
+    
