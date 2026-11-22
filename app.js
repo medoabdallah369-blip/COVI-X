@@ -96,3 +96,4 @@ if(configured){
  const app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);
  onAuthStateChanged(auth,user=>{currentUser=user;showApp(!!user);if(user)subscribe();else{unsub.forEach(fn=>fn());products=[];sales=[];expenses=[]}});
 }else{$("loginMsg").textContent="نسخة تجهيز: اربط التطبيق بقاعدة بيانات Firebase حسب دليل README لتفعيل الدخول والمزامنة."}
+  
