@@ -463,7 +463,7 @@ $("addExpenseBtn").onclick = () => {
 };
 
 /* المشتريات */
-function addPurchaseRow() {
+  function addPurchaseRow() {
   const row = document.createElement("div");
   row.className = "purchase-row";
 
@@ -529,133 +529,7 @@ $("addPurchaseBtn").onclick = () => {
       <button type="button" class="secondary" id="addPurchaseRowBtn">＋ إضافة صنف</button>
     </div>
 
-    <div id="purchaseRows"></div>
 
-    <div class="panel">
-      <strong>إجمالي الفاتورة:</strong>
-      <strong id="purchaseTotal">0 ج</strong>
-    </div>
-
-    <p class="muted small">حالة الدفع: مدفوع بالكامل</p>
-
-    <button class="primary" type="submit">حفظ فاتورة الشراء</button>
-  `, async d => {
-    const rows = [...document.querySelectorAll(".purchase-row")];
-
-    if (!rows.length) throw Error("أضف صنفًا واحدًا على الأقل");
-
-    const items = rows.map(row => {
-      const productId = row.querySelector(".purchase-product").value;
-      const qty = Number(row.querySelector(".purchase-qty").value);
-      const unitCost = Number(row.querySelector(".purchase-cost").value);
-      const product = products.find(p => p.id === productId);
-
-      if (!product || !Number.isInteger(qty) || qty < 1) {
-        throw Error("راجع المنتج والكمية");
-      }
-
-      if (!Number.isFinite(unitCost) || unitCost < 0) {
-        throw Error("راجع سعر الشراء");
-      }
-
-      return {
-        productId,
-        productName: product.name,
-        qty,
-        unitCost,
-        lineTotal: qty * unitCost
-      };
-    });
-
-    const total = items.reduce((sum, item) => sum + item.lineTotal, 0);
-    const grouped = new Map();
-
-    items.forEach(item => {
-      const old = grouped.get(item.productId) || {
-        qty: 0,
-        totalCost: 0
-      };
-
-      old.qty += item.qty;
-      old.totalCost += item.qty * item.unitCost;
-
-      grouped.set(item.productId, old);
-    });
-
-    const purchaseRef = doc(coll("purchases"));
-
-    await runTransaction(db, async transaction => {
-      const updates = [];
-
-      for (const [productId, purchase] of grouped) {
-        const productRef = doc(
-          db, "workspaces", "COVIX", "products", productId
-        );
-
-        const snap = await transaction.get(productRef);
-
-        if (!snap.exists()) throw Error("أحد المنتجات غير موجود");
-
-        const data = snap.data();
-        const oldStock = Number(data.stock || 0);
-        const oldCost = Number(data.cost || 0);
-        const newStock = oldStock + purchase.qty;
-
-        const averageCost = newStock > 0
-          ? (oldStock * oldCost + purchase.totalCost) / newStock
-          : 0;
-
-        updates.push({
-          ref: productRef,
-          stock: newStock,
-          cost: averageCost
-        });
-      }
-
-      updates.forEach(update => {
-        transaction.update(update.ref, {
-          stock: update.stock,
-          cost: update.cost
-        });
-      });
-
-      transaction.set(purchaseRef, {
-        supplierName: d.supplierName,
-        date: d.date,
-        items,
-        total,
-        paymentStatus: "مدفوع بالكامل",
-        createdAt: serverTimestamp(),
-        createdBy: currentUser.uid
-      });
-    });
-  });
-
-  addPurchaseRow();
-
-  $("addPurchaseRowBtn").onclick = addPurchaseRow;
-
-  $("modalForm").addEventListener("input", e => {
-    if (
-      e.target.classList.contains("purchase-qty") ||
-      e.target.classList.contains("purchase-cost")
-    ) {
-      calculatePurchaseTotal();
-    }
-  });
-
-  $("modalForm").addEventListener("click", e => {
-    if (e.target.classList.contains("remove-purchase-row")) {
-      e.target.closest(".purchase-row").remove();
-
-      if (!document.querySelector(".purchase-row")) {
-        addPurchaseRow();
-      }
-
-      calculatePurchaseTotal();
-    }
-  });
-};
 
 /* تعديل وحذف المنتجات والسجلات */
 document.addEventListener("click", async e => {
