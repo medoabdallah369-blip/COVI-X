@@ -147,6 +147,7 @@ function render() {
       ).join("")
     : "كل المنتجات أعلى من حد التنبيه (3 قطع).";
 
+  /* المنتجات */
   $("productsList").innerHTML = products.map(p => `
     <div class="item">
       <div>
@@ -156,13 +157,29 @@ function render() {
           تكلفة ${money(p.cost)} · بيع ${money(p.price)}
         </small>
       </div>
+
       <div class="item-actions">
         <span class="pill">المخزون ${Number(p.stock || 0)}</span>
-        <button class="danger" data-del="products" data-id="${p.id}">حذف</button>
+
+        <button
+          type="button"
+          class="secondary"
+          data-edit-product="${safe(p.id)}">
+          تعديل
+        </button>
+
+        <button
+          type="button"
+          class="danger"
+          data-del="products"
+          data-id="${safe(p.id)}">
+          حذف
+        </button>
       </div>
     </div>
   `).join("") || '<div class="panel muted">لا توجد منتجات بعد.</div>';
 
+  /* المبيعات */
   $("salesList").innerHTML = sales.map(s => `
     <div class="item">
       <div>
@@ -171,11 +188,12 @@ function render() {
       </div>
       <div class="item-actions">
         <span class="pill">${safe(s.status)}</span>
-        <button class="danger" data-del="sales" data-id="${s.id}">حذف</button>
+        <button class="danger" data-del="sales" data-id="${safe(s.id)}">حذف</button>
       </div>
     </div>
   `).join("") || '<div class="panel muted">لا توجد طلبات مسجلة.</div>';
 
+  /* المصروفات */
   $("expensesList").innerHTML = expenses.map(e => `
     <div class="item">
       <div>
@@ -184,11 +202,12 @@ function render() {
       </div>
       <div class="item-actions">
         <b>${money(e.amount)}</b>
-        <button class="danger" data-del="expenses" data-id="${e.id}">حذف</button>
+        <button class="danger" data-del="expenses" data-id="${safe(e.id)}">حذف</button>
       </div>
     </div>
   `).join("") || '<div class="panel muted">لا توجد مصروفات مسجلة.</div>';
 
+  /* المشتريات - بدون حذف لحماية المخزون */
   $("purchasesList").innerHTML = purchases.map(p => `
     <div class="item">
       <div>
@@ -200,7 +219,6 @@ function render() {
       </div>
       <div class="item-actions">
         <span class="pill">مدفوعة</span>
-        <button class="danger" data-del="purchases" data-id="${p.id}">حذف</button>
       </div>
     </div>
   `).join("") || '<div class="panel muted">لا توجد فواتير شراء حتى الآن.</div>';
@@ -237,19 +255,106 @@ $("addProductBtn").onclick = () => {
     <label>اسم المنتج<input name="name" required></label>
     <label>كود المنتج<input name="code"></label>
     <label>التصنيف<input name="category"></label>
-    <label>تكلفة الوحدة بالجنيه<input name="cost" type="number" min="0" step=".01" required></label>
-    <label>سعر البيع بالجنيه<input name="price" type="number" min="0" step=".01" required></label>
-    <label>الكمية الحالية<input name="stock" type="number" min="0" required></label>
+    <label>تكلفة الوحدة بالجنيه
+      <input name="cost" type="number" min="0" step=".01" required>
+    </label>
+    <label>سعر البيع بالجنيه
+      <input name="price" type="number" min="0" step=".01" required>
+    </label>
+    <label>الكمية الحالية
+      <input name="stock" type="number" min="0" step="1" required>
+    </label>
     <button class="primary">حفظ المنتج</button>
-  `, d => addDoc(coll("products"), {
-    ...d,
-    cost: Number(d.cost),
-    price: Number(d.price),
-    stock: Number(d.stock),
-    createdAt: serverTimestamp(),
-    createdBy: currentUser.uid
-  }));
+  `, d => {
+    const cost = Number(d.cost);
+    const price = Number(d.price);
+    const stock = Number(d.stock);
+
+    if (!d.name.trim()) throw Error("اكتب اسم المنتج");
+    if (!Number.isFinite(cost) || cost < 0) throw Error("راجع التكلفة");
+    if (!Number.isFinite(price) || price < 0) throw Error("راجع سعر البيع");
+    if (!Number.isInteger(stock) || stock < 0) throw Error("راجع الكمية");
+
+    return addDoc(coll("products"), {
+      name: d.name.trim(),
+      code: d.code.trim(),
+      category: d.category.trim(),
+      cost,
+      price,
+      stock,
+      createdAt: serverTimestamp(),
+      createdBy: currentUser.uid
+    });
+  });
 };
+
+/* تعديل منتج */
+function editProduct(productId) {
+  const p = products.find(x => x.id === productId);
+
+  if (!p) {
+    toast("المنتج غير موجود");
+    return;
+  }
+
+  openModal("تعديل المنتج", `
+    <label>اسم المنتج
+      <input name="name" value="${safe(p.name)}" required>
+    </label>
+
+    <label>كود المنتج
+      <input name="code" value="${safe(p.code || "")}">
+    </label>
+
+    <label>التصنيف
+      <input name="category" value="${safe(p.category || "")}">
+    </label>
+
+    <label>تكلفة الوحدة بالجنيه
+      <input name="cost" type="number" min="0" step=".01"
+        value="${Number(p.cost || 0)}" required>
+    </label>
+
+    <label>سعر البيع بالجنيه
+      <input name="price" type="number" min="0" step=".01"
+        value="${Number(p.price || 0)}" required>
+    </label>
+
+    <label>الكمية الحالية في المخزون
+      <input name="stock" type="number" min="0" step="1"
+        value="${Number(p.stock || 0)}" required>
+    </label>
+
+    <p class="muted small">
+      تعديل البيانات لا يغيّر أسعار فواتير الشراء والمبيعات السابقة.
+    </p>
+
+    <button class="primary">حفظ التعديلات</button>
+  `, async d => {
+    const cost = Number(d.cost);
+    const price = Number(d.price);
+    const stock = Number(d.stock);
+
+    if (!d.name.trim()) throw Error("اكتب اسم المنتج");
+    if (!Number.isFinite(cost) || cost < 0) throw Error("راجع التكلفة");
+    if (!Number.isFinite(price) || price < 0) throw Error("راجع سعر البيع");
+    if (!Number.isInteger(stock) || stock < 0) throw Error("راجع الكمية");
+
+    await updateDoc(
+      doc(db, "workspaces", "COVIX", "products", productId),
+      {
+        name: d.name.trim(),
+        code: d.code.trim(),
+        category: d.category.trim(),
+        cost,
+        price,
+        stock,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser.uid
+      }
+    );
+  });
+}
 
 /* تحديث المخزون عند التسليم */
 async function updateStock(p, qty) {
@@ -275,7 +380,7 @@ $("addSaleBtn").onclick = () => {
   }
 
   const opts = products.map(p => `
-    <option value="${p.id}">
+    <option value="${safe(p.id)}">
       ${safe(p.name)} — ${money(p.price)} (متاح ${p.stock})
     </option>
   `).join("");
@@ -284,7 +389,9 @@ $("addSaleBtn").onclick = () => {
     <label>اسم العميل<input name="customer" required></label>
     <label>رقم الهاتف<input name="phone"></label>
     <label>المنتج<select name="productId">${opts}</select></label>
-    <label>الكمية<input name="qty" type="number" min="1" value="1" required></label>
+    <label>الكمية
+      <input name="qty" type="number" min="1" step="1" value="1" required>
+    </label>
     <label>حالة الطلب
       <select name="status">
         <option>جديد</option>
@@ -300,7 +407,9 @@ $("addSaleBtn").onclick = () => {
     const p = products.find(x => x.id === d.productId);
     const qty = Number(d.qty);
 
-    if (!p || qty < 1) throw Error("بيانات المنتج أو الكمية غير صحيحة");
+    if (!p || !Number.isInteger(qty) || qty < 1) {
+      throw Error("بيانات المنتج أو الكمية غير صحيحة");
+    }
 
     if (d.status === "تم التسليم") {
       await updateStock(p, qty);
@@ -326,17 +435,31 @@ $("addSaleBtn").onclick = () => {
 /* المصروفات */
 $("addExpenseBtn").onclick = () => {
   openModal("إضافة مصروف", `
-    <label>نوع المصروف<input name="type" placeholder="إعلان / تغليف / شحن" required></label>
-    <label>المبلغ بالجنيه<input name="amount" type="number" min="0" step=".01" required></label>
-    <label>التاريخ<input name="date" type="date" required></label>
+    <label>نوع المصروف
+      <input name="type" placeholder="إعلان / تغليف / شحن" required>
+    </label>
+    <label>المبلغ بالجنيه
+      <input name="amount" type="number" min="0" step=".01" required>
+    </label>
+    <label>التاريخ
+      <input name="date" type="date" required>
+    </label>
     <label>ملاحظات<input name="note"></label>
     <button class="primary">حفظ المصروف</button>
-  `, d => addDoc(coll("expenses"), {
-    ...d,
-    amount: Number(d.amount),
-    createdAt: serverTimestamp(),
-    createdBy: currentUser.uid
-  }));
+  `, d => {
+    const amount = Number(d.amount);
+
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw Error("راجع مبلغ المصروف");
+    }
+
+    return addDoc(coll("expenses"), {
+      ...d,
+      amount,
+      createdAt: serverTimestamp(),
+      createdBy: currentUser.uid
+    });
+  });
 };
 
 /* المشتريات */
@@ -348,13 +471,13 @@ function addPurchaseRow() {
     <label>المنتج
       <select class="purchase-product" required>
         ${products.map(p => `
-          <option value="${p.id}">${safe(p.name)}</option>
+          <option value="${safe(p.id)}">${safe(p.name)}</option>
         `).join("")}
       </select>
     </label>
 
     <label>الكمية
-      <input class="purchase-qty" type="number" min="1" value="1" required>
+      <input class="purchase-qty" type="number" min="1" step="1" value="1" required>
     </label>
 
     <label>سعر شراء الوحدة
@@ -445,7 +568,6 @@ $("addPurchaseBtn").onclick = () => {
     });
 
     const total = items.reduce((sum, item) => sum + item.lineTotal, 0);
-
     const grouped = new Map();
 
     items.forEach(item => {
@@ -535,18 +657,59 @@ $("addPurchaseBtn").onclick = () => {
   });
 };
 
-/* حذف السجلات */
+/* تعديل وحذف المنتجات والسجلات */
 document.addEventListener("click", async e => {
+  const editButton = e.target.closest("[data-edit-product]");
+
+  if (editButton) {
+    editProduct(editButton.dataset.editProduct);
+    return;
+  }
+
   const b = e.target.closest("[data-del]");
   if (!b) return;
 
-  if (!confirm("هل تريد حذف هذا السجل؟")) return;
+  const collectionName = b.dataset.del;
+  const recordId = b.dataset.id;
+
+  if (collectionName === "products") {
+    const product = products.find(p => p.id === recordId);
+
+    if (!product) {
+      toast("المنتج غير موجود");
+      return;
+    }
+
+    const hasSales = sales.some(s => s.productId === recordId);
+
+    const hasPurchases = purchases.some(p =>
+      (p.items || []).some(item => item.productId === recordId)
+    );
+
+    if (hasSales || hasPurchases) {
+      toast("لا يمكن حذف المنتج لوجود مبيعات أو مشتريات مرتبطة به. يمكنك تعديل بياناته.");
+      return;
+    }
+
+    if (Number(product.stock || 0) !== 0) {
+      toast("لا يمكن حذف المنتج والمخزون به كمية. يجب أن تكون الكمية صفرًا أولاً.");
+      return;
+    }
+  }
+
+  if (collectionName === "purchases") {
+    toast("حذف فاتورة الشراء غير متاح لحماية حساب المخزون.");
+    return;
+  }
+
+  if (!confirm("هل أنت متأكد أنك تريد حذف هذا السجل؟")) return;
 
   try {
     await deleteDoc(
-      doc(db, "workspaces", "COVIX", b.dataset.del, b.dataset.id)
+      doc(db, "workspaces", "COVIX", collectionName, recordId)
     );
-    toast("تم الحذف");
+
+    toast("تم الحذف بنجاح");
   } catch (err) {
     toast("تعذر الحذف: " + err.message);
   }
@@ -603,21 +766,4 @@ if (configured) {
   auth = getAuth(app);
   db = getFirestore(app);
 
-  onAuthStateChanged(auth, user => {
-    currentUser = user;
-    showApp(!!user);
-
-    if (user) {
-      subscribe();
-    } else {
-      unsub.forEach(fn => fn());
-      products = [];
-      sales = [];
-      expenses = [];
-      purchases = [];
-    }
-  });
-} else {
-  $("loginMsg").textContent =
-    "اربط التطبيق بقاعدة بيانات Firebase لتفعيل الدخول والمزامنة.";
-  }
+  onAuth
