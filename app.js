@@ -21,7 +21,10 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-// Firebase configuration
+// --------------------
+// Firebase
+// --------------------
+
 const firebaseConfig = {
   apiKey: "AIzaSyB9Lq_LhCYezEb_JiVPDHXmyZZvQ_jOdWo",
   authDomain: "covi-x.firebaseapp.com",
@@ -32,12 +35,8 @@ const firebaseConfig = {
   measurementId: "G-R78D64XJM0"
 };
 
-const configured = !Object.values(firebaseConfig).some(v =>
-  String(v).startsWith("ADD_")
-);
-
-let auth = null;
-let db = null;
+let auth;
+let db;
 let currentUser = null;
 
 let products = [];
@@ -45,17 +44,17 @@ let sales = [];
 let expenses = [];
 let purchases = [];
 
-let unsub = [];
+let unsubscribers = [];
 let modalSubmitHandler = null;
 
 const $ = id => document.getElementById(id);
 
+const number = value => Number(value || 0);
+
 const money = value =>
-  Number(value || 0).toLocaleString("ar-EG", {
+  number(value).toLocaleString("ar-EG", {
     maximumFractionDigits: 2
   }) + " ج.م";
-
-const number = value => Number(value || 0);
 
 const escapeHTML = value =>
   String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -68,6 +67,7 @@ const escapeHTML = value =>
 
 function toast(message) {
   const element = $("toast");
+
   if (!element) {
     alert(message);
     return;
@@ -77,6 +77,7 @@ function toast(message) {
   element.classList.add("show");
 
   clearTimeout(toast.timer);
+
   toast.timer = setTimeout(() => {
     element.classList.remove("show");
   }, 3000);
@@ -103,6 +104,7 @@ function formatDate(value) {
   }
 
   const date = new Date(value);
+
   return Number.isNaN(date.getTime())
     ? "—"
     : date.toLocaleDateString("ar-EG");
@@ -208,22 +210,30 @@ function renderProducts() {
     <div class="item">
       <div>
         <strong>${escapeHTML(product.name)}</strong>
+
         <div class="muted">
           الكود: ${escapeHTML(product.code || "—")}
           | ${escapeHTML(product.category || "عام")}
         </div>
+
         <div>
           المخزون: ${number(product.stock)}
           | سعر البيع: ${money(product.salePrice)}
         </div>
+
         <div class="muted">
           تكلفة الوحدة: ${money(product.purchasePrice)}
         </div>
       </div>
 
       <div class="item-actions">
-        <button class="primary" data-edit-product="${product.id}">تعديل</button>
-        <button class="danger" data-delete-product="${product.id}">حذف</button>
+        <button class="primary" data-edit-product="${escapeHTML(product.id)}">
+          تعديل
+        </button>
+
+        <button class="danger" data-delete-product="${escapeHTML(product.id)}">
+          حذف
+        </button>
       </div>
     </div>
   `).join("");
@@ -242,6 +252,7 @@ function openProductForm(product = null) {
       ${field("سعر الشراء", "purchasePrice", "number", true, product?.purchasePrice ?? 0)}
       ${field("الكمية في المخزون", "stock", "number", true, product?.stock ?? 0)}
       ${field("حد التنبيه للمخزون", "minStock", "number", false, product?.minStock ?? 5)}
+
       <button class="primary" type="submit">حفظ</button>
     `,
     async form => {
@@ -257,13 +268,22 @@ function openProductForm(product = null) {
       };
 
       if (!data.name) throw new Error("اكتب اسم المنتج");
-      if (data.salePrice < 0 || data.purchasePrice < 0 || data.stock < 0) {
+
+      if (
+        data.salePrice < 0 ||
+        data.purchasePrice < 0 ||
+        data.stock < 0 ||
+        data.minStock < 0
+      ) {
         throw new Error("لا يمكن إدخال أرقام سالبة");
       }
 
       if (isEdit) {
         await runTransaction(db, async transaction => {
-          transaction.update(getDocument("products", product.id), data);
+          transaction.update(
+            getDocument("products", product.id),
+            data
+          );
         });
       } else {
         data.createdAt = serverTimestamp();
@@ -308,21 +328,26 @@ function renderSales() {
     <div class="item">
       <div>
         <strong>${escapeHTML(sale.productName || "عملية بيع")}</strong>
+
         <div class="muted">
           العميل: ${escapeHTML(sale.customerName || "—")}
           | التاريخ: ${formatDate(sale.date)}
         </div>
+
         <div>
           الكمية: ${number(sale.qty)}
           | الإجمالي: ${money(sale.total)}
         </div>
+
         <div class="muted">
           الحالة: ${escapeHTML(sale.status || "جديد")}
         </div>
       </div>
 
       <div class="item-actions">
-        <button class="danger" data-delete-sale="${sale.id}">حذف</button>
+        <button class="danger" data-delete-sale="${escapeHTML(sale.id)}">
+          حذف
+        </button>
       </div>
     </div>
   `).join("");
@@ -344,15 +369,25 @@ function openSaleForm() {
           label: `${product.name} - المتاح ${number(product.stock)}`
         }))
       ])}
+
       ${field("اسم العميل", "customerName", "text", false)}
       ${field("الكمية", "qty", "number")}
       ${field("سعر البيع للوحدة", "unitPrice", "number")}
+
       ${selectField("حالة الطلب", "status", [
         { value: "تم التسليم", label: "تم التسليم" },
         { value: "قيد التجهيز", label: "قيد التجهيز" },
         { value: "ملغي", label: "ملغي" }
       ])}
-      ${field("التاريخ", "date", "date", true, new Date().toISOString().slice(0, 10))}
+
+      ${field(
+        "التاريخ",
+        "date",
+        "date",
+        true,
+        new Date().toISOString().slice(0, 10)
+      )}
+
       <button class="primary" type="submit">حفظ</button>
     `,
     async form => {
@@ -365,11 +400,14 @@ function openSaleForm() {
       const unitPrice = number(form.get("unitPrice"));
       const status = form.get("status");
 
-      if (qty <= 0 || unitPrice < 0) {
+      if (!Number.isInteger(qty) || qty <= 0 || unitPrice < 0) {
         throw new Error("راجع الكمية والسعر");
       }
 
-      if (status === "تم التسليم" && qty > number(product.stock)) {
+      if (
+        status === "تم التسليم" &&
+        qty > number(product.stock)
+      ) {
         throw new Error("الكمية المطلوبة أكبر من المخزون المتاح");
       }
 
@@ -421,6 +459,48 @@ function openSaleForm() {
   );
 }
 
+async function deleteSale(id) {
+  const sale = sales.find(item => item.id === id);
+  if (!sale) return;
+
+  if (!confirm("هل تريد حذف عملية البيع؟")) return;
+
+  await runTransaction(db, async transaction => {
+    const saleRef = getDocument("sales", id);
+    const saleSnapshot = await transaction.get(saleRef);
+
+    if (!saleSnapshot.exists()) {
+      throw new Error("عملية البيع غير موجودة");
+    }
+
+    const saleData = saleSnapshot.data();
+
+    let productSnapshot = null;
+    let productRef = null;
+
+    if (
+      saleData.status === "تم التسليم" &&
+      saleData.productId
+    ) {
+      productRef = getDocument("products", saleData.productId);
+      productSnapshot = await transaction.get(productRef);
+    }
+
+    if (productSnapshot?.exists()) {
+      const currentStock = number(productSnapshot.data().stock);
+
+      transaction.update(productRef, {
+        stock: currentStock + number(saleData.qty),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    transaction.delete(saleRef);
+  });
+
+  toast("تم حذف البيع وتحديث المخزون");
+}
+
 // --------------------
 // Expenses
 // --------------------
@@ -438,15 +518,19 @@ function renderExpenses() {
     <div class="item">
       <div>
         <strong>${escapeHTML(expense.title || "مصروف")}</strong>
+
         <div class="muted">
           ${escapeHTML(expense.category || "عام")}
           | ${formatDate(expense.date)}
         </div>
+
         <strong>${money(expense.amount)}</strong>
       </div>
 
       <div class="item-actions">
-        <button class="danger" data-delete-expense="${expense.id}">حذف</button>
+        <button class="danger" data-delete-expense="${escapeHTML(expense.id)}">
+          حذف
+        </button>
       </div>
     </div>
   `).join("");
@@ -459,13 +543,22 @@ function openExpenseForm() {
       ${field("اسم المصروف", "title")}
       ${field("التصنيف", "category", "text", false)}
       ${field("المبلغ", "amount", "number")}
-      ${field("التاريخ", "date", "date", true, new Date().toISOString().slice(0, 10))}
+      ${field(
+        "التاريخ",
+        "date",
+        "date",
+        true,
+        new Date().toISOString().slice(0, 10)
+      )}
+
       <button class="primary" type="submit">حفظ</button>
     `,
     async form => {
       const amount = number(form.get("amount"));
 
-      if (amount <= 0) throw new Error("اكتب مبلغًا صحيحًا");
+      if (amount <= 0) {
+        throw new Error("اكتب مبلغًا صحيحًا");
+      }
 
       await addDoc(getCollection("expenses"), {
         title: String(form.get("title")).trim(),
@@ -482,6 +575,13 @@ function openExpenseForm() {
   );
 }
 
+async function deleteExpense(id) {
+  if (!confirm("هل تريد حذف هذا المصروف؟")) return;
+
+  await deleteDoc(getDocument("expenses", id));
+  toast("تم حذف المصروف");
+}
+
 // --------------------
 // Purchases
 // --------------------
@@ -489,11 +589,13 @@ function openExpenseForm() {
 function purchaseProductOptions() {
   return `
     <option value="">اختر المنتج</option>
+
     ${products.map(product => `
-      <option value="${product.id}">
+      <option value="${escapeHTML(product.id)}">
         ${escapeHTML(product.name)} - المخزون ${number(product.stock)}
       </option>
     `).join("")}
+
     <option value="__new__">+ إضافة منتج جديد</option>
   `;
 }
@@ -507,6 +609,7 @@ function addPurchaseRow() {
 
   row.innerHTML = `
     <div class="purchase-fields">
+
       <label>
         المنتج
         <select class="form-input purchase-product" required>
@@ -515,6 +618,7 @@ function addPurchaseRow() {
       </label>
 
       <div class="purchase-new-product hidden">
+
         <label>
           اسم المنتج الجديد
           <input class="form-input new-product-name" type="text">
@@ -532,21 +636,44 @@ function addPurchaseRow() {
 
         <label>
           سعر البيع
-          <input class="form-input new-product-sale" type="number" min="0" step="any">
+          <input
+            class="form-input new-product-sale"
+            type="number"
+            min="0"
+            step="any"
+          >
         </label>
+
       </div>
 
       <label>
         الكمية
-        <input class="form-input purchase-qty" type="number" min="1" step="1" value="1" required>
+        <input
+          class="form-input purchase-qty"
+          type="number"
+          min="1"
+          step="1"
+          value="1"
+          required
+        >
       </label>
 
       <label>
         سعر الشراء للوحدة
-        <input class="form-input purchase-cost" type="number" min="0" step="any" value="0" required>
+        <input
+          class="form-input purchase-cost"
+          type="number"
+          min="0"
+          step="any"
+          value="0"
+          required
+        >
       </label>
 
-      <button type="button" class="danger remove-purchase-row">حذف الصنف</button>
+      <button type="button" class="danger remove-purchase-row">
+        حذف الصنف
+      </button>
+
     </div>
   `;
 
@@ -565,7 +692,10 @@ function updatePurchaseTotal() {
   });
 
   const output = $("purchaseTotal");
-  if (output) output.textContent = money(total);
+
+  if (output) {
+    output.textContent = money(total);
+  }
 }
 
 function renderPurchases() {
@@ -581,16 +711,19 @@ function renderPurchases() {
     <div class="item">
       <div>
         <strong>فاتورة مشتريات</strong>
+
         <div class="muted">
           المورد: ${escapeHTML(purchase.supplierName || "—")}
           | ${formatDate(purchase.date)}
         </div>
+
         <div>
           عدد الأصناف: ${(purchase.items || []).length}
           | الإجمالي: ${money(purchase.total)}
         </div>
+
         <div class="muted">
-          ${escapeHTML(purchase.paymentStatus || "—")}
+          الحالة: ${escapeHTML(purchase.paymentStatus || "—")}
         </div>
       </div>
     </div>
@@ -602,11 +735,22 @@ function openPurchaseForm() {
     "فاتورة مشتريات جديدة",
     `
       ${field("اسم المورد", "supplierName", "text", false)}
-      ${field("تاريخ الفاتورة", "date", "date", true, new Date().toISOString().slice(0, 10))}
+
+      ${field(
+        "تاريخ الفاتورة",
+        "date",
+        "date",
+        true,
+        new Date().toISOString().slice(0, 10)
+      )}
 
       <div id="purchaseRows"></div>
 
-      <button type="button" class="primary" id="addPurchaseRowBtn">
+      <button
+        type="button"
+        class="primary"
+        id="addPurchaseRowBtn"
+      >
         + إضافة صنف
       </button>
 
@@ -615,7 +759,9 @@ function openPurchaseForm() {
         <strong id="purchaseTotal">${money(0)}</strong>
       </div>
 
-      <button class="primary" type="submit">حفظ فاتورة المشتريات</button>
+      <button class="primary" type="submit">
+        حفظ فاتورة المشتريات
+      </button>
     `,
     async form => {
       const rows = [...form.querySelectorAll(".purchase-row")];
@@ -631,25 +777,41 @@ function openPurchaseForm() {
       let total = 0;
 
       for (const row of rows) {
-        const selectedId = row.querySelector(".purchase-product")?.value;
-        const qty = number(row.querySelector(".purchase-qty")?.value);
-        const unitCost = number(row.querySelector(".purchase-cost")?.value);
+        const selectedId =
+          row.querySelector(".purchase-product")?.value;
+
+        const qty =
+          number(row.querySelector(".purchase-qty")?.value);
+
+        const unitCost =
+          number(row.querySelector(".purchase-cost")?.value);
 
         if (!selectedId) {
           throw new Error("اختر منتجًا في كل صف");
         }
 
-        if (!Number.isInteger(qty) || qty <= 0 || unitCost < 0) {
+        if (
+          !Number.isInteger(qty) ||
+          qty <= 0 ||
+          unitCost < 0
+        ) {
           throw new Error("راجع الكمية وسعر الشراء");
         }
 
         const lineTotal = qty * unitCost;
 
         if (selectedId === "__new__") {
-          const name = row.querySelector(".new-product-name")?.value.trim();
-          const code = row.querySelector(".new-product-code")?.value.trim() || "";
-          const category = row.querySelector(".new-product-category")?.value.trim() || "";
-          const salePrice = number(row.querySelector(".new-product-sale")?.value);
+          const name =
+            row.querySelector(".new-product-name")?.value.trim();
+
+          const code =
+            row.querySelector(".new-product-code")?.value.trim() || "";
+
+          const category =
+            row.querySelector(".new-product-category")?.value.trim() || "";
+
+          const salePrice =
+            number(row.querySelector(".new-product-sale")?.value);
 
           if (!name) {
             throw new Error("اكتب اسم المنتج الجديد");
@@ -658,6 +820,8 @@ function openPurchaseForm() {
           if (salePrice < 0) {
             throw new Error("سعر البيع غير صحيح");
           }
+
+          const newProductIndex = newProducts.length;
 
           newProducts.push({
             name,
@@ -671,436 +835,7 @@ function openPurchaseForm() {
 
           items.push({
             productId: null,
+            newProductIndex,
             productName: name,
             qty,
-            unitCost,
-            lineTotal,
-            isNewProduct: true
-          });
-        } else {
-          const product = products.find(item => item.id === selectedId);
-
-          if (!product) {
-            throw new Error("أحد المنتجات المختارة غير موجود");
-          }
-
-          const previous = existingTotals.get(selectedId) || {
-            qty: 0,
-            cost: 0,
-            product
-          };
-
-          previous.qty += qty;
-          previous.cost += lineTotal;
-
-          existingTotals.set(selectedId, previous);
-
-          items.push({
-            productId: selectedId,
-            productName: product.name,
-            qty,
-            unitCost,
-            lineTotal,
-            isNewProduct: false
-          });
-        }
-
-        total += lineTotal;
-      }
-
-      const supplierName = String(form.get("supplierName") || "").trim();
-      const date = form.get("date");
-
-      await runTransaction(db, async transaction => {
-        // All reads must happen before writes.
-        const snapshots = new Map();
-
-        for (const productId of existingTotals.keys()) {
-          const ref = getDocument("products", productId);
-          const snapshot = await transaction.get(ref);
-
-          if (!snapshot.exists()) {
-            throw new Error("أحد المنتجات لم يعد موجودًا");
-          }
-
-          snapshots.set(productId, snapshot);
-        }
-
-        const finalItems = [];
-
-        // Update existing products.
-        for (const [productId, entry] of existingTotals.entries()) {
-          const snapshot = snapshots.get(productId);
-          const oldData = snapshot.data();
-
-          const oldStock = number(oldData.stock);
-          const oldCost = number(oldData.purchasePrice);
-          const newStock = oldStock + entry.qty;
-
-          const averageCost = newStock > 0
-            ? ((oldStock * oldCost) + entry.cost) / newStock
-            : 0;
-
-          transaction.update(getDocument("products", productId), {
-            stock: newStock,
-            purchasePrice: averageCost,
-            updatedAt: serverTimestamp()
-          });
-        }
-
-        
-        // Create new products.
-        let newProductIndex = 0;
-
-        for (const item of items) {
-          if (!item.isNewProduct) {
-            finalItems.push(item);
-            continue;
-          }
-
-          const newData = newProducts[newProductIndex++];
-          const newProductRef = doc(getCollection("products"));
-
-          transaction.set(newProductRef, {
-            name: newData.name,
-            code: newData.code,
-            category: newData.category,
-            salePrice: newData.salePrice,
-            purchasePrice: newData.unitCost,
-            stock: newData.qty,
-            minStock: 5,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
-
-          finalItems.push({
-            ...item,
-            productId: newProductRef.id
-          });
-        }
-
-        // Save purchase invoice.
-        const purchaseRef = doc(getCollection("purchases"));
-
-        transaction.set(purchaseRef, {
-          supplierName,
-          date,
-          items: finalItems,
-          total,
-          paymentStatus: "مدفوع بالكامل",
-          createdAt: serverTimestamp(),
-          createdBy: currentUser.uid
-        });
-      });
-
-      closeModal();
-      toast("تم حفظ فاتورة المشتريات وتحديث المخزون بنجاح");
-    }
-  );
-
-  addPurchaseRow();
-}
-
-// --------------------
-// Dashboard
-// --------------------
-
-function renderDashboard() {
-  const totalSales = sales.reduce((sum, item) => sum + number(item.total), 0);
-  const deliveredSales = sales.filter(item => item.status === "تم التسليم");
-
-  const totalProfit = deliveredSales.reduce(
-    (sum, item) => sum + number(item.profit),
-    0
-  );
-
-  const totalExpenses = expenses.reduce(
-    (sum, item) => sum + number(item.amount),
-    0
-  );
-
-  const stockValue = products.reduce(
-    (sum, item) => sum + number(item.stock) * number(item.purchasePrice),
-    0
-  );
-
-  const netProfit = totalProfit - totalExpenses;
-
-  if ($("totalSales")) $("totalSales").textContent = money(totalSales);
-  if ($("netProfit")) $("netProfit").textContent = money(netProfit);
-  if ($("ordersCount")) $("ordersCount").textContent = sales.length;
-  if ($("stockValue")) $("stockValue").textContent = money(stockValue);
-
-  if ($("quickSummary")) {
-    $("quickSummary").innerHTML = `
-      <div>إجمالي المبيعات: ${money(totalSales)}</div>
-      <div>إجمالي المصروفات: ${money(totalExpenses)}</div>
-      <div>صافي الربح التقريبي: ${money(netProfit)}</div>
-      <div>قيمة المخزون: ${money(stockValue)}</div>
-    `;
-  }
-
-  const lowStock = $("lowStock");
-
-  if (lowStock) {
-    const lowProducts = products.filter(
-      item => number(item.stock) <= number(item.minStock)
-    );
-
-    lowStock.innerHTML = lowProducts.length
-      ? lowProducts.map(item => `
-          <div class="item">
-            ${escapeHTML(item.name)}
-            <span class="pill">المتبقي ${number(item.stock)}</span>
-          </div>
-        `).join("")
-      : `<p class="muted">لا توجد منتجات منخفضة المخزون</p>`;
-  }
-}
-
-function renderAll() {
-  renderProducts();
-  renderSales();
-  renderExpenses();
-  renderPurchases();
-  renderDashboard();
-}
-
-// --------------------
-// Firestore subscriptions
-// --------------------
-
-function subscribeToCollection(name, callback) {
-  const q = query(getCollection(name), orderBy("createdAt", "desc"));
-
-  const unsubscribe = onSnapshot(
-    q,
-    snapshot => {
-      callback(snapshot.docs.map(item => ({
-        id: item.id,
-        ...item.data()
-      })));
-
-      renderAll();
-    },
-    error => {
-      console.error(`Error loading ${name}:`, error);
-      toast("حدث خطأ أثناء تحميل البيانات");
-    }
-  );
-
-  unsub.push(unsubscribe);
-}
-
-function subscribe() {
-  unsub.forEach(fn => fn());
-  unsub = [];
-
-  subscribeToCollection("products", data => products = data);
-  subscribeToCollection("sales", data => sales = data);
-  subscribeToCollection("expenses", data => expenses = data);
-  subscribeToCollection("purchases", data => purchases = data);
-}
-
-// --------------------
-// Events
-// --------------------
-
-function setupEvents() {
-  $("loginBtn")?.addEventListener("click", async () => {
-    const email = $("email")?.value.trim();
-    const password = $("password")?.value;
-
-    if (!email || !password) {
-      if ($("loginMsg")) {
-        $("loginMsg").textContent = "اكتب البريد الإلكتروني وكلمة المرور";
-      }
-      return;
-    }
-
-    try {
-      if ($("loginMsg")) $("loginMsg").textContent = "";
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      console.error(error);
-      if ($("loginMsg")) {
-        $("loginMsg").textContent = "بيانات تسجيل الدخول غير صحيحة";
-      }
-    }
-  });
-
-  $("logoutBtn")?.addEventListener("click", async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error(error);
-      toast("تعذر تسجيل الخروج");
-    }
-  });
-
-  $("addProductBtn")?.addEventListener("click", () => openProductForm());
-  $("addSaleBtn")?.addEventListener("click", openSaleForm);
-  $("addExpenseBtn")?.addEventListener("click", openExpenseForm);
-  $("addPurchaseBtn")?.addEventListener("click", openPurchaseForm);
-
-  $("closeModal")?.addEventListener("click", closeModal);
-
-  $("modal")?.addEventListener("click", event => {
-    if (event.target === $("modal")) closeModal();
-  });
-
-  $("productsList")?.addEventListener("click", event => {
-    const editButton = event.target.closest("[data-edit-product]");
-    const deleteButton = event.target.closest("[data-delete-product]");
-
-    if (editButton) {
-      const product = products.find(
-        item => item.id === editButton.dataset.editProduct
-      );
-      if (product) openProductForm(product);
-    }
-
-    if (deleteButton) {
-      deleteProduct(deleteButton.dataset.deleteProduct).catch(error => {
-        console.error(error);
-        toast("تعذر حذف المنتج");
-      });
-    }
-  });
-
-  $("salesList")?.addEventListener("click", async event => {
-    const button = event.target.closest("[data-delete-sale]");
-    if (!button) return;
-
-    if (!confirm("هل تريد حذف سجل البيع؟")) return;
-
-    try {
-      await deleteDoc(getDocument("sales", button.dataset.deleteSale));
-      toast("تم حذف سجل البيع");
-    } catch (error) {
-      console.error(error);
-      toast("تعذر حذف سجل البيع");
-    }
-  });
-
-  $("expensesList")?.addEventListener("click", async event => {
-    const button = event.target.closest("[data-delete-expense]");
-    if (!button) return;
-
-    if (!confirm("هل تريد حذف المصروف؟")) return;
-
-    try {
-      await deleteDoc(getDocument("expenses", button.dataset.deleteExpense));
-      toast("تم حذف المصروف");
-    } catch (error) {
-      console.error(error);
-      toast("تعذر حذف المصروف");
-    }
-  });
-
-  $("modalForm")?.addEventListener("click", event => {
-    if (event.target.id === "addPurchaseRowBtn") {
-      addPurchaseRow();
-    }
-
-    if (event.target.classList.contains("remove-purchase-row")) {
-      event.target.closest(".purchase-row")?.remove();
-      updatePurchaseTotal();
-    }
-  });
-
-  $("modalForm")?.addEventListener("change", event => {
-    if (event.target.classList.contains("purchase-product")) {
-      const row = event.target.closest(".purchase-row");
-      const newFields = row?.querySelector(".purchase-new-product");
-
-      if (newFields) {
-        newFields.classList.toggle(
-          "hidden",
-          event.target.value !== "__new__"
-        );
-
-        const nameInput = newFields.querySelector(".new-product-name");
-        if (nameInput) {
-          nameInput.required = event.target.value === "__new__";
-        }
-
-        const saleInput = newFields.querySelector(".new-product-sale");
-        if (saleInput) {
-          saleInput.required = event.target.value === "__new__";
-        }
-      }
-    }
-  });
-
-  $("modalForm")?.addEventListener("input", event => {
-    if (
-      event.target.classList.contains("purchase-qty") ||
-      event.target.classList.contains("purchase-cost")
-    ) {
-      updatePurchaseTotal();
-    }
-  });
-
-  document.querySelectorAll("[data-page]").forEach(button => {
-    button.addEventListener("click", () => {
-      const page = button.dataset.page;
-
-      document.querySelectorAll("[data-section]").forEach(section => {
-        section.classList.toggle(
-          "hidden",
-          section.dataset.section !== page
-        );
-      });
-
-      document.querySelectorAll("[data-page]").forEach(item => {
-        item.classList.toggle("active", item === button);
-      });
-    });
-  });
-}
-
-// --------------------
-// Start application
-// --------------------
-
-setupEvents();
-showApp(false);
-
-if (configured) {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-
-  onAuthStateChanged(auth, user => {
-    currentUser = user;
-
-    if (user) {
-      showApp(true);
-      subscribe();
-    } else {
-      unsub.forEach(fn => fn());
-      unsub = [];
-
-      products = [];
-      sales = [];
-      expenses = [];
-      purchases = [];
-
-      renderAll();
-      showApp(false);
-    }
-  });
-} else {
-  toast("إعدادات Firebase غير مكتملة");
-}
-
-// Register service worker.
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(error => {
-      console.log("Service worker registration failed:", error);
-    });
-  });
-      }
-    
+       
