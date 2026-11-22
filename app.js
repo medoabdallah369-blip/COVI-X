@@ -838,4 +838,146 @@ function openPurchaseForm() {
             newProductIndex,
             productName: name,
             qty,
-       
+                   unitCost,
+            lineTotal
+          });
+
+          total += lineTotal;
+          continue;
+        }
+
+        const product = products.find(p => p.id === selectedId);
+
+        if (!product) {
+          throw new Error("المنتج المحدد غير موجود");
+        }
+
+        const current = existingTotals.get(selectedId) || {
+          qty: 0,
+          totalCost: 0,
+          product
+        };
+
+        current.qty += qty;
+        current.totalCost += lineTotal;
+
+        existingTotals.set(selectedId, current);
+
+        items.push({
+          productId: selectedId,
+          productName: product.name,
+          qty,
+          unitCost,
+          lineTotal
+        });
+
+        total += lineTotal;
+      }
+
+      const supplierName =
+        form.querySelector('[name="supplierName"]')?.value.trim() || "";
+
+      const date =
+        form.querySelector('[name="date"]')?.value ||
+        new Date().toISOString().slice(0, 10);
+
+      await runTransaction(db, async transaction => {
+        const updates = [];
+
+        for (const [productId, data] of existingTotals) {
+          const productRef = doc(
+            db,
+            "workspaces",
+            "COVIX",
+            "products",
+            productId
+          );
+
+          const productSnap = await transaction.get(productRef);
+
+          if (!productSnap.exists()) {
+            throw new Error("أحد المنتجات لم يعد موجودًا");
+          }
+
+          const oldProduct = productSnap.data();
+          const oldStock = number(oldProduct.stock);
+          const oldCost = number(oldProduct.purchasePrice);
+
+          const newStock = oldStock + data.qty;
+
+          const averageCost =
+            newStock > 0
+              ? (
+                  oldStock * oldCost +
+                  data.totalCost
+                ) / newStock
+              : 0;
+
+          updates.push({
+            ref: productRef,
+            stock: newStock,
+            purchasePrice: averageCost
+          });
+        }
+
+        for (const update of updates) {
+          transaction.update(update.ref, {
+            stock: update.stock,
+            purchasePrice: update.purchasePrice,
+            updatedAt: serverTimestamp()
+          });
+        }
+
+        const finalItems = [...items];
+
+        for (let i = 0; i < newProducts.length; i++) {
+          const productData = newProducts[i];
+          const productRef = doc(
+            collection(db, "workspaces", "COVIX", "products")
+          );
+
+          transaction.set(productRef, {
+            name: productData.name,
+            code: productData.code,
+            category: productData.category,
+            salePrice: productData.salePrice,
+            purchasePrice: productData.unitCost,
+            stock: productData.qty,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+
+          for (const item of finalItems) {
+            if (item.newProductIndex === i) {
+              item.productId = productRef.id;
+              delete item.newProductIndex;
+            }
+          }
+        }
+
+        const purchaseRef = doc(
+          collection(db, "workspaces", "COVIX", "purchases")
+        );
+
+        transaction.set(purchaseRef, {
+          supplierName,
+          date,
+          items: finalItems,
+          total,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      closeModal();
+    }
+  );
+
+  const addRowBtn = document.getElementById("addPurchaseRowBtn");
+
+  addRowBtn?.addEventListener("click", () => {
+    addPurchaseRow();
+  });
+
+  addPurchaseRow();
+            }
