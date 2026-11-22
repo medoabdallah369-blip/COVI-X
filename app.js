@@ -17,12 +17,11 @@ import {
   onSnapshot,
   query,
   orderBy,
-  serverTimestamp,
-  updateDoc,
-  runTransaction
+  runTransaction,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
-/* Firebase */
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyB9Lq_LhCYezEb_JiVPDHXmyZZvQ_jOdWo",
   authDomain: "covi-x.firebaseapp.com",
@@ -37,607 +36,716 @@ const configured = !Object.values(firebaseConfig).some(v =>
   String(v).startsWith("ADD_")
 );
 
-let auth, db, currentUser;
+let auth = null;
+let db = null;
+let currentUser = null;
 
 let products = [];
 let sales = [];
 let expenses = [];
 let purchases = [];
+
 let unsub = [];
+let modalSubmitHandler = null;
 
 const $ = id => document.getElementById(id);
 
-const money = n =>
-  (Number(n) || 0).toLocaleString("ar-EG", {
+const money = value =>
+  Number(value || 0).toLocaleString("ar-EG", {
     maximumFractionDigits: 2
-  }) + " ج";
+  }) + " ج.م";
 
-const safe = s =>
-  String(s ?? "").replace(/[&<>"']/g, c => ({
+const number = value => Number(value || 0);
+
+const escapeHTML = value =>
+  String(value ?? "").replace(/[&<>"']/g, char => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
     '"': "&quot;",
-    "'": "&#39;"
-  }[c]));
+    "'": "&#039;"
+  })[char]);
 
-function toast(msg) {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
-  setTimeout(() => $("toast").classList.remove("show"), 2600);
+function toast(message) {
+  const element = $("toast");
+  if (!element) {
+    alert(message);
+    return;
+  }
+
+  element.textContent = message;
+  element.classList.add("show");
+
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => {
+    element.classList.remove("show");
+  }, 3000);
 }
 
-function showApp(yes) {
-  $("login").classList.toggle("hidden", yes);
-  $("app").classList.toggle("hidden", !yes);
+function showApp(loggedIn) {
+  $("login")?.classList.toggle("hidden", loggedIn);
+  $("app")?.classList.toggle("hidden", !loggedIn);
 }
 
-function coll(name) {
+function getCollection(name) {
   return collection(db, "workspaces", "COVIX", name);
 }
 
-/* تحميل البيانات */
-function subscribe() {
-  unsub.forEach(fn => fn());
-  unsub = [];
+function getDocument(name, id) {
+  return doc(db, "workspaces", "COVIX", name, id);
+}
 
-  for (const name of ["products", "sales", "expenses", "purchases"]) {
-    const fn = onSnapshot(
-      query(coll(name), orderBy("createdAt", "desc")),
-      snap => {
-        const data = snap.docs.map(d => ({
-          id: d.id,
-          ...d.data()
-        }));
+function formatDate(value) {
+  if (!value) return "—";
 
-        if (name === "products") products = data;
-        if (name === "sales") sales = data;
-        if (name === "expenses") expenses = data;
-        if (name === "purchases") purchases = data;
-
-        render();
-      },
-      err => toast("تعذر تحميل البيانات: " + err.message)
-    );
-
-    unsub.push(fn);
+  if (value.toDate) {
+    return value.toDate().toLocaleDateString("ar-EG");
   }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : date.toLocaleDateString("ar-EG");
 }
 
-/* عرض البيانات */
-function render() {
-  const delivered = sales.filter(s => s.status === "تم التسليم");
+function openModal(title, html, handler) {
+  const modal = $("modal");
+  const form = $("modalForm");
 
-  const revenue = delivered.reduce(
-    (a, s) => a + Number(s.total || 0), 0
-  );
+  if (!modal || !form) {
+    toast("نافذة الإدخال غير موجودة في الصفحة");
+    return;
+  }
 
-  const cogs = delivered.reduce(
-    (a, s) => a + Number(s.costTotal || 0), 0
-  );
-
-  const exp = expenses.reduce(
-    (a, e) => a + Number(e.amount || 0), 0
-  );
-
-  $("totalSales").textContent = money(revenue);
-  $("netProfit").textContent = money(revenue - cogs - exp);
-  $("ordersCount").textContent = delivered.length;
-
-  $("stockValue").textContent = money(
-    products.reduce(
-      (a, p) => a + Math.max(0, Number(p.stock || 0)) *
-        Number(p.cost || 0), 0
-    )
-  );
-
-  $("quickSummary").textContent =
-    `لديك ${products.length} منتج مسجل، و` +
-    `${sales.filter(s =>
-      s.status !== "تم التسليم" &&
-      s.status !== "ملغي" &&
-      s.status !== "مرتجع"
-    ).length} طلب قيد التنفيذ.`;
-
-  const low = products.filter(p => Number(p.stock || 0) <= 3);
-
-  $("lowStock").innerHTML = low.length
-    ? low.map(p =>
-        `<div>${safe(p.name)} — المتبقي ${Number(p.stock || 0)}</div>`
-      ).join("")
-    : "كل المنتجات أعلى من حد التنبيه (3 قطع).";
-
-  /* المنتجات */
-  $("productsList").innerHTML = products.map(p => `
-    <div class="item">
-      <div>
-        <strong>${safe(p.name)}</strong>
-        <small>
-          ${safe(p.code || "بدون كود")} ·
-          تكلفة ${money(p.cost)} · بيع ${money(p.price)}
-        </small>
-      </div>
-
-      <div class="item-actions">
-        <span class="pill">المخزون ${Number(p.stock || 0)}</span>
-
-        <button
-          type="button"
-          class="secondary"
-          data-edit-product="${safe(p.id)}">
-          تعديل
-        </button>
-
-        <button
-          type="button"
-          class="danger"
-          data-del="products"
-          data-id="${safe(p.id)}">
-          حذف
-        </button>
-      </div>
-    </div>
-  `).join("") || '<div class="panel muted">لا توجد منتجات بعد.</div>';
-
-  /* المبيعات */
-  $("salesList").innerHTML = sales.map(s => `
-    <div class="item">
-      <div>
-        <strong>${safe(s.customer)} · ${money(s.total)}</strong>
-        <small>${safe(s.productName)} × ${s.qty} · ${safe(s.phone || "")}</small>
-      </div>
-      <div class="item-actions">
-        <span class="pill">${safe(s.status)}</span>
-        <button class="danger" data-del="sales" data-id="${safe(s.id)}">حذف</button>
-      </div>
-    </div>
-  `).join("") || '<div class="panel muted">لا توجد طلبات مسجلة.</div>';
-
-  /* المصروفات */
-  $("expensesList").innerHTML = expenses.map(e => `
-    <div class="item">
-      <div>
-        <strong>${safe(e.type)}</strong>
-        <small>${safe(e.note || "")} · ${safe(e.date || "")}</small>
-      </div>
-      <div class="item-actions">
-        <b>${money(e.amount)}</b>
-        <button class="danger" data-del="expenses" data-id="${safe(e.id)}">حذف</button>
-      </div>
-    </div>
-  `).join("") || '<div class="panel muted">لا توجد مصروفات مسجلة.</div>';
-
-  /* المشتريات - بدون حذف لحماية المخزون */
-  $("purchasesList").innerHTML = purchases.map(p => `
-    <div class="item">
-      <div>
-        <strong>${safe(p.supplierName)} · ${money(p.total)}</strong>
-        <small>
-          ${safe(p.date)} · ${(p.items || []).length} أصناف ·
-          ${safe(p.paymentStatus)}
-        </small>
-      </div>
-      <div class="item-actions">
-        <span class="pill">مدفوعة</span>
-      </div>
-    </div>
-  `).join("") || '<div class="panel muted">لا توجد فواتير شراء حتى الآن.</div>';
-}
-
-/* النوافذ */
-function openModal(title, html, onSubmit) {
   $("modalTitle").textContent = title;
-  $("modalForm").innerHTML = html;
-  $("modal").classList.remove("hidden");
+  form.innerHTML = html;
+  modalSubmitHandler = handler;
 
-  $("modalForm").onsubmit = async e => {
-    e.preventDefault();
+  form.onsubmit = async event => {
+    event.preventDefault();
 
-    const fd = new FormData(e.target);
+    if (!modalSubmitHandler) return;
+
+    const submitButton = form.querySelector('[type="submit"]');
+
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "جارٍ الحفظ...";
+    }
 
     try {
-      await onSubmit(Object.fromEntries(fd.entries()));
-      $("modal").classList.add("hidden");
-      toast("تم الحفظ بنجاح");
-    } catch (err) {
-      toast("لم يتم الحفظ: " + err.message);
+      await modalSubmitHandler(new FormData(form));
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "حدث خطأ أثناء الحفظ");
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = "حفظ";
+      }
     }
   };
+
+  modal.classList.remove("hidden");
 }
 
-$("closeModal").onclick = () => {
-  $("modal").classList.add("hidden");
-};
+function closeModal() {
+  $("modal")?.classList.add("hidden");
 
-/* إضافة منتج */
-$("addProductBtn").onclick = () => {
-  openModal("إضافة منتج", `
-    <label>اسم المنتج<input name="name" required></label>
-    <label>كود المنتج<input name="code"></label>
-    <label>التصنيف<input name="category"></label>
-    <label>تكلفة الوحدة بالجنيه
-      <input name="cost" type="number" min="0" step=".01" required>
-    </label>
-    <label>سعر البيع بالجنيه
-      <input name="price" type="number" min="0" step=".01" required>
-    </label>
-    <label>الكمية الحالية
-      <input name="stock" type="number" min="0" step="1" required>
-    </label>
-    <button class="primary">حفظ المنتج</button>
-  `, d => {
-    const cost = Number(d.cost);
-    const price = Number(d.price);
-    const stock = Number(d.stock);
-
-    if (!d.name.trim()) throw Error("اكتب اسم المنتج");
-    if (!Number.isFinite(cost) || cost < 0) throw Error("راجع التكلفة");
-    if (!Number.isFinite(price) || price < 0) throw Error("راجع سعر البيع");
-    if (!Number.isInteger(stock) || stock < 0) throw Error("راجع الكمية");
-
-    return addDoc(coll("products"), {
-      name: d.name.trim(),
-      code: d.code.trim(),
-      category: d.category.trim(),
-      cost,
-      price,
-      stock,
-      createdAt: serverTimestamp(),
-      createdBy: currentUser.uid
-    });
-  });
-};
-
-/* تعديل منتج */
-function editProduct(productId) {
-  const p = products.find(x => x.id === productId);
-
-  if (!p) {
-    toast("المنتج غير موجود");
-    return;
+  if ($("modalForm")) {
+    $("modalForm").onsubmit = null;
+    $("modalForm").innerHTML = "";
   }
 
-  openModal("تعديل المنتج", `
-    <label>اسم المنتج
-      <input name="name" value="${safe(p.name)}" required>
-    </label>
-
-    <label>كود المنتج
-      <input name="code" value="${safe(p.code || "")}">
-    </label>
-
-    <label>التصنيف
-      <input name="category" value="${safe(p.category || "")}">
-    </label>
-
-    <label>تكلفة الوحدة بالجنيه
-      <input name="cost" type="number" min="0" step=".01"
-        value="${Number(p.cost || 0)}" required>
-    </label>
-
-    <label>سعر البيع بالجنيه
-      <input name="price" type="number" min="0" step=".01"
-        value="${Number(p.price || 0)}" required>
-    </label>
-
-    <label>الكمية الحالية في المخزون
-      <input name="stock" type="number" min="0" step="1"
-        value="${Number(p.stock || 0)}" required>
-    </label>
-
-    <p class="muted small">
-      تعديل البيانات لا يغيّر أسعار فواتير الشراء والمبيعات السابقة.
-    </p>
-
-    <button class="primary">حفظ التعديلات</button>
-  `, async d => {
-    const cost = Number(d.cost);
-    const price = Number(d.price);
-    const stock = Number(d.stock);
-
-    if (!d.name.trim()) throw Error("اكتب اسم المنتج");
-    if (!Number.isFinite(cost) || cost < 0) throw Error("راجع التكلفة");
-    if (!Number.isFinite(price) || price < 0) throw Error("راجع سعر البيع");
-    if (!Number.isInteger(stock) || stock < 0) throw Error("راجع الكمية");
-
-    await updateDoc(
-      doc(db, "workspaces", "COVIX", "products", productId),
-      {
-        name: d.name.trim(),
-        code: d.code.trim(),
-        category: d.category.trim(),
-        cost,
-        price,
-        stock,
-        updatedAt: serverTimestamp(),
-        updatedBy: currentUser.uid
-      }
-    );
-  });
+  modalSubmitHandler = null;
 }
 
-/* تحديث المخزون عند التسليم */
-async function updateStock(p, qty) {
-  await runTransaction(db, async transaction => {
-    const ref = doc(db, "workspaces", "COVIX", "products", p.id);
-    const snap = await transaction.get(ref);
-
-    if (!snap.exists()) throw Error("المنتج غير موجود");
-
-    const stock = Number(snap.data().stock || 0);
-
-    if (qty > stock) throw Error("المخزون غير كافٍ");
-
-    transaction.update(ref, { stock: stock - qty });
-  });
+function field(label, name, type = "text", required = true, value = "") {
+  return `
+    <label class="form-label">
+      ${label}
+      <input
+        class="form-input"
+        name="${name}"
+        type="${type}"
+        value="${escapeHTML(value)}"
+        ${required ? "required" : ""}
+        ${type === "number" ? 'step="any"' : ""}
+      >
+    </label>
+  `;
 }
 
-/* المبيعات */
-$("addSaleBtn").onclick = () => {
-  if (!products.length) {
-    toast("أضف منتجًا أولاً");
-    return;
-  }
-
-  const opts = products.map(p => `
-    <option value="${safe(p.id)}">
-      ${safe(p.name)} — ${money(p.price)} (متاح ${p.stock})
-    </option>
-  `).join("");
-
-  openModal("تسجيل طلب جديد", `
-    <label>اسم العميل<input name="customer" required></label>
-    <label>رقم الهاتف<input name="phone"></label>
-    <label>المنتج<select name="productId">${opts}</select></label>
-    <label>الكمية
-      <input name="qty" type="number" min="1" step="1" value="1" required>
-    </label>
-    <label>حالة الطلب
-      <select name="status">
-        <option>جديد</option>
-        <option>تم التأكيد</option>
-        <option>تم الشحن</option>
-        <option>تم التسليم</option>
-        <option>ملغي</option>
-        <option>مرتجع</option>
+function selectField(label, name, options, required = true) {
+  return `
+    <label class="form-label">
+      ${label}
+      <select class="form-input" name="${name}" ${required ? "required" : ""}>
+        ${options.map(option => `
+          <option value="${escapeHTML(option.value)}">
+            ${escapeHTML(option.label)}
+          </option>
+        `).join("")}
       </select>
     </label>
-    <button class="primary">حفظ الطلب</button>
-  `, async d => {
-    const p = products.find(x => x.id === d.productId);
-    const qty = Number(d.qty);
+  `;
+}
 
-    if (!p || !Number.isInteger(qty) || qty < 1) {
-      throw Error("بيانات المنتج أو الكمية غير صحيحة");
+// --------------------
+// Products
+// --------------------
+
+function renderProducts() {
+  const container = $("productsList");
+  if (!container) return;
+
+  if (!products.length) {
+    container.innerHTML = `<p class="muted">لا توجد منتجات حتى الآن</p>`;
+    return;
+  }
+
+  container.innerHTML = products.map(product => `
+    <div class="item">
+      <div>
+        <strong>${escapeHTML(product.name)}</strong>
+        <div class="muted">
+          الكود: ${escapeHTML(product.code || "—")}
+          | ${escapeHTML(product.category || "عام")}
+        </div>
+        <div>
+          المخزون: ${number(product.stock)}
+          | سعر البيع: ${money(product.salePrice)}
+        </div>
+        <div class="muted">
+          تكلفة الوحدة: ${money(product.purchasePrice)}
+        </div>
+      </div>
+
+      <div class="item-actions">
+        <button class="primary" data-edit-product="${product.id}">تعديل</button>
+        <button class="danger" data-delete-product="${product.id}">حذف</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function openProductForm(product = null) {
+  const isEdit = Boolean(product);
+
+  openModal(
+    isEdit ? "تعديل المنتج" : "إضافة منتج جديد",
+    `
+      ${field("اسم المنتج", "name", "text", true, product?.name || "")}
+      ${field("كود المنتج", "code", "text", false, product?.code || "")}
+      ${field("التصنيف", "category", "text", false, product?.category || "")}
+      ${field("سعر البيع", "salePrice", "number", true, product?.salePrice ?? "")}
+      ${field("سعر الشراء", "purchasePrice", "number", true, product?.purchasePrice ?? 0)}
+      ${field("الكمية في المخزون", "stock", "number", true, product?.stock ?? 0)}
+      ${field("حد التنبيه للمخزون", "minStock", "number", false, product?.minStock ?? 5)}
+      <button class="primary" type="submit">حفظ</button>
+    `,
+    async form => {
+      const data = {
+        name: String(form.get("name")).trim(),
+        code: String(form.get("code") || "").trim(),
+        category: String(form.get("category") || "").trim(),
+        salePrice: number(form.get("salePrice")),
+        purchasePrice: number(form.get("purchasePrice")),
+        stock: number(form.get("stock")),
+        minStock: number(form.get("minStock")),
+        updatedAt: serverTimestamp()
+      };
+
+      if (!data.name) throw new Error("اكتب اسم المنتج");
+      if (data.salePrice < 0 || data.purchasePrice < 0 || data.stock < 0) {
+        throw new Error("لا يمكن إدخال أرقام سالبة");
+      }
+
+      if (isEdit) {
+        await runTransaction(db, async transaction => {
+          transaction.update(getDocument("products", product.id), data);
+        });
+      } else {
+        data.createdAt = serverTimestamp();
+        await addDoc(getCollection("products"), data);
+      }
+
+      closeModal();
+      toast("تم حفظ المنتج بنجاح");
     }
+  );
+}
 
-    if (d.status === "تم التسليم") {
-      await updateStock(p, qty);
+async function deleteProduct(id) {
+  const product = products.find(item => item.id === id);
+  if (!product) return;
+
+  if (number(product.stock) > 0) {
+    toast("لا يمكن حذف منتج لديه كمية في المخزون");
+    return;
+  }
+
+  if (!confirm("هل أنت متأكد من حذف المنتج؟")) return;
+
+  await deleteDoc(getDocument("products", id));
+  toast("تم حذف المنتج");
+}
+
+// --------------------
+// Sales
+// --------------------
+
+function renderSales() {
+  const container = $("salesList");
+  if (!container) return;
+
+  if (!sales.length) {
+    container.innerHTML = `<p class="muted">لا توجد مبيعات حتى الآن</p>`;
+    return;
+  }
+
+  container.innerHTML = sales.map(sale => `
+    <div class="item">
+      <div>
+        <strong>${escapeHTML(sale.productName || "عملية بيع")}</strong>
+        <div class="muted">
+          العميل: ${escapeHTML(sale.customerName || "—")}
+          | التاريخ: ${formatDate(sale.date)}
+        </div>
+        <div>
+          الكمية: ${number(sale.qty)}
+          | الإجمالي: ${money(sale.total)}
+        </div>
+        <div class="muted">
+          الحالة: ${escapeHTML(sale.status || "جديد")}
+        </div>
+      </div>
+
+      <div class="item-actions">
+        <button class="danger" data-delete-sale="${sale.id}">حذف</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function openSaleForm() {
+  if (!products.length) {
+    toast("أضف منتجًا أولًا قبل تسجيل البيع");
+    return;
+  }
+
+  openModal(
+    "تسجيل عملية بيع",
+    `
+      ${selectField("المنتج", "productId", [
+        { value: "", label: "اختر المنتج" },
+        ...products.map(product => ({
+          value: product.id,
+          label: `${product.name} - المتاح ${number(product.stock)}`
+        }))
+      ])}
+      ${field("اسم العميل", "customerName", "text", false)}
+      ${field("الكمية", "qty", "number")}
+      ${field("سعر البيع للوحدة", "unitPrice", "number")}
+      ${selectField("حالة الطلب", "status", [
+        { value: "تم التسليم", label: "تم التسليم" },
+        { value: "قيد التجهيز", label: "قيد التجهيز" },
+        { value: "ملغي", label: "ملغي" }
+      ])}
+      ${field("التاريخ", "date", "date", true, new Date().toISOString().slice(0, 10))}
+      <button class="primary" type="submit">حفظ</button>
+    `,
+    async form => {
+      const productId = form.get("productId");
+      const product = products.find(item => item.id === productId);
+
+      if (!product) throw new Error("اختر منتجًا صحيحًا");
+
+      const qty = number(form.get("qty"));
+      const unitPrice = number(form.get("unitPrice"));
+      const status = form.get("status");
+
+      if (qty <= 0 || unitPrice < 0) {
+        throw new Error("راجع الكمية والسعر");
+      }
+
+      if (status === "تم التسليم" && qty > number(product.stock)) {
+        throw new Error("الكمية المطلوبة أكبر من المخزون المتاح");
+      }
+
+      const saleData = {
+        productId,
+        productName: product.name,
+        customerName: String(form.get("customerName") || "").trim(),
+        qty,
+        unitPrice,
+        total: qty * unitPrice,
+        status,
+        date: form.get("date"),
+        costPrice: number(product.purchasePrice),
+        profit: (unitPrice - number(product.purchasePrice)) * qty,
+        createdAt: serverTimestamp(),
+        createdBy: currentUser.uid
+      };
+
+      await runTransaction(db, async transaction => {
+        const productRef = getDocument("products", productId);
+        const productSnapshot = await transaction.get(productRef);
+
+        if (!productSnapshot.exists()) {
+          throw new Error("المنتج لم يعد موجودًا");
+        }
+
+        const currentStock = number(productSnapshot.data().stock);
+
+        if (status === "تم التسليم") {
+          if (qty > currentStock) {
+            throw new Error("المخزون غير كافٍ");
+          }
+
+          transaction.update(productRef, {
+            stock: currentStock - qty,
+            updatedAt: serverTimestamp()
+          });
+        }
+
+        transaction.set(
+          doc(getCollection("sales")),
+          saleData
+        );
+      });
+
+      closeModal();
+      toast("تم تسجيل البيع بنجاح");
     }
+  );
+}
 
-    await addDoc(coll("sales"), {
-      customer: d.customer,
-      phone: d.phone,
-      productId: p.id,
-      productName: p.name,
-      qty,
-      unitPrice: Number(p.price),
-      unitCost: Number(p.cost),
-      total: qty * Number(p.price),
-      costTotal: qty * Number(p.cost),
-      status: d.status,
-      createdAt: serverTimestamp(),
-      createdBy: currentUser.uid
-    });
-  });
-};
+// --------------------
+// Expenses
+// --------------------
 
-/* المصروفات */
-$("addExpenseBtn").onclick = () => {
-  openModal("إضافة مصروف", `
-    <label>نوع المصروف
-      <input name="type" placeholder="إعلان / تغليف / شحن" required>
-    </label>
-    <label>المبلغ بالجنيه
-      <input name="amount" type="number" min="0" step=".01" required>
-    </label>
-    <label>التاريخ
-      <input name="date" type="date" required>
-    </label>
-    <label>ملاحظات<input name="note"></label>
-    <button class="primary">حفظ المصروف</button>
-  `, d => {
-    const amount = Number(d.amount);
+function renderExpenses() {
+  const container = $("expensesList");
+  if (!container) return;
 
-    if (!Number.isFinite(amount) || amount < 0) {
-      throw Error("راجع مبلغ المصروف");
+  if (!expenses.length) {
+    container.innerHTML = `<p class="muted">لا توجد مصروفات</p>`;
+    return;
+  }
+
+  container.innerHTML = expenses.map(expense => `
+    <div class="item">
+      <div>
+        <strong>${escapeHTML(expense.title || "مصروف")}</strong>
+        <div class="muted">
+          ${escapeHTML(expense.category || "عام")}
+          | ${formatDate(expense.date)}
+        </div>
+        <strong>${money(expense.amount)}</strong>
+      </div>
+
+      <div class="item-actions">
+        <button class="danger" data-delete-expense="${expense.id}">حذف</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function openExpenseForm() {
+  openModal(
+    "إضافة مصروف",
+    `
+      ${field("اسم المصروف", "title")}
+      ${field("التصنيف", "category", "text", false)}
+      ${field("المبلغ", "amount", "number")}
+      ${field("التاريخ", "date", "date", true, new Date().toISOString().slice(0, 10))}
+      <button class="primary" type="submit">حفظ</button>
+    `,
+    async form => {
+      const amount = number(form.get("amount"));
+
+      if (amount <= 0) throw new Error("اكتب مبلغًا صحيحًا");
+
+      await addDoc(getCollection("expenses"), {
+        title: String(form.get("title")).trim(),
+        category: String(form.get("category") || "").trim(),
+        amount,
+        date: form.get("date"),
+        createdAt: serverTimestamp(),
+        createdBy: currentUser.uid
+      });
+
+      closeModal();
+      toast("تم تسجيل المصروف");
     }
+  );
+}
 
-    return addDoc(coll("expenses"), {
-      ...d,
-      amount,
-      createdAt: serverTimestamp(),
-      createdBy: currentUser.uid
-    });
-  });
-};
+// --------------------
+// Purchases
+// --------------------
 
-/* المشتريات */
-  function addPurchaseRow() {
+function purchaseProductOptions() {
+  return `
+    <option value="">اختر المنتج</option>
+    ${products.map(product => `
+      <option value="${product.id}">
+        ${escapeHTML(product.name)} - المخزون ${number(product.stock)}
+      </option>
+    `).join("")}
+    <option value="__new__">+ إضافة منتج جديد</option>
+  `;
+}
+
+function addPurchaseRow() {
+  const container = $("purchaseRows");
+  if (!container) return;
+
   const row = document.createElement("div");
   row.className = "purchase-row";
 
   row.innerHTML = `
-    <label>المنتج
-      <select class="purchase-product" required>
-        ${products.map(p => `
-          <option value="${safe(p.id)}">${safe(p.name)}</option>
-        `).join("")}
-      </select>
-    </label>
+    <div class="purchase-fields">
+      <label>
+        المنتج
+        <select class="form-input purchase-product" required>
+          ${purchaseProductOptions()}
+        </select>
+      </label>
 
-    <label>الكمية
-      <input class="purchase-qty" type="number" min="1" step="1" value="1" required>
-    </label>
+      <div class="purchase-new-product hidden">
+        <label>
+          اسم المنتج الجديد
+          <input class="form-input new-product-name" type="text">
+        </label>
 
-    <label>سعر شراء الوحدة
-      <input class="purchase-cost" type="number" min="0" step=".01" required>
-    </label>
+        <label>
+          كود المنتج
+          <input class="form-input new-product-code" type="text">
+        </label>
 
-    <button type="button" class="danger remove-purchase-row">حذف الصنف</button>
+        <label>
+          التصنيف
+          <input class="form-input new-product-category" type="text">
+        </label>
+
+        <label>
+          سعر البيع
+          <input class="form-input new-product-sale" type="number" min="0" step="any">
+        </label>
+      </div>
+
+      <label>
+        الكمية
+        <input class="form-input purchase-qty" type="number" min="1" step="1" value="1" required>
+      </label>
+
+      <label>
+        سعر الشراء للوحدة
+        <input class="form-input purchase-cost" type="number" min="0" step="any" value="0" required>
+      </label>
+
+      <button type="button" class="danger remove-purchase-row">حذف الصنف</button>
+    </div>
   `;
 
-  $("purchaseRows").appendChild(row);
-  calculatePurchaseTotal();
+  container.appendChild(row);
+  updatePurchaseTotal();
 }
 
-function calculatePurchaseTotal() {
+function updatePurchaseTotal() {
+  const rows = document.querySelectorAll(".purchase-row");
   let total = 0;
 
-  document.querySelectorAll(".purchase-row").forEach(row => {
+  rows.forEach(row => {
     total +=
-      Number(row.querySelector(".purchase-qty").value || 0) *
-      Number(row.querySelector(".purchase-cost").value || 0);
+      number(row.querySelector(".purchase-qty")?.value) *
+      number(row.querySelector(".purchase-cost")?.value);
   });
 
-  if ($("purchaseTotal")) {
-    $("purchaseTotal").textContent = money(total);
-  }
+  const output = $("purchaseTotal");
+  if (output) output.textContent = money(total);
 }
 
-$("addPurchaseBtn").onclick = () => {
-  if (!products.length) {
-    toast("أضف المنتجات أولاً من قسم المخزون");
+function renderPurchases() {
+  const container = $("purchasesList");
+  if (!container) return;
+
+  if (!purchases.length) {
+    container.innerHTML = `<p class="muted">لا توجد فواتير مشتريات حتى الآن</p>`;
     return;
   }
 
-  const now = new Date();
-  const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-    .toISOString().slice(0, 10);
-
-  openModal("إضافة فاتورة شراء", `
-    <label>اسم المورد
-      <input name="supplierName" required placeholder="اسم المورد">
-    </label>
-
-    <label>تاريخ الشراء
-      <input name="date" type="date" value="${today}" required>
-    </label>
-
-    <div class="section-head">
-      <h3>أصناف الفاتورة</h3>
-      <button type="button" class="secondary" id="addPurchaseRowBtn">＋ إضافة صنف</button>
+  container.innerHTML = purchases.map(purchase => `
+    <div class="item">
+      <div>
+        <strong>فاتورة مشتريات</strong>
+        <div class="muted">
+          المورد: ${escapeHTML(purchase.supplierName || "—")}
+          | ${formatDate(purchase.date)}
+        </div>
+        <div>
+          عدد الأصناف: ${(purchase.items || []).length}
+          | الإجمالي: ${money(purchase.total)}
+        </div>
+        <div class="muted">
+          ${escapeHTML(purchase.paymentStatus || "—")}
+        </div>
+      </div>
     </div>
-
-
-
-/* تعديل وحذف المنتجات والسجلات */
-document.addEventListener("click", async e => {
-  const editButton = e.target.closest("[data-edit-product]");
-
-  if (editButton) {
-    editProduct(editButton.dataset.editProduct);
-    return;
-  }
-
-  const b = e.target.closest("[data-del]");
-  if (!b) return;
-
-  const collectionName = b.dataset.del;
-  const recordId = b.dataset.id;
-
-  if (collectionName === "products") {
-    const product = products.find(p => p.id === recordId);
-
-    if (!product) {
-      toast("المنتج غير موجود");
-      return;
-    }
-
-    const hasSales = sales.some(s => s.productId === recordId);
-
-    const hasPurchases = purchases.some(p =>
-      (p.items || []).some(item => item.productId === recordId)
-    );
-
-    if (hasSales || hasPurchases) {
-      toast("لا يمكن حذف المنتج لوجود مبيعات أو مشتريات مرتبطة به. يمكنك تعديل بياناته.");
-      return;
-    }
-
-    if (Number(product.stock || 0) !== 0) {
-      toast("لا يمكن حذف المنتج والمخزون به كمية. يجب أن تكون الكمية صفرًا أولاً.");
-      return;
-    }
-  }
-
-  if (collectionName === "purchases") {
-    toast("حذف فاتورة الشراء غير متاح لحماية حساب المخزون.");
-    return;
-  }
-
-  if (!confirm("هل أنت متأكد أنك تريد حذف هذا السجل؟")) return;
-
-  try {
-    await deleteDoc(
-      doc(db, "workspaces", "COVIX", collectionName, recordId)
-    );
-
-    toast("تم الحذف بنجاح");
-  } catch (err) {
-    toast("تعذر الحذف: " + err.message);
-  }
-});
-
-/* التنقل */
-document.querySelectorAll(".navbtn").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll(".navbtn").forEach(x =>
-      x.classList.remove("selected")
-    );
-
-    b.classList.add("selected");
-
-    document.querySelectorAll(".page").forEach(x =>
-      x.classList.remove("active")
-    );
-
-    const page = $(b.dataset.page);
-    if (page) page.classList.add("active");
-  };
-});
-
-/* تسجيل الدخول والخروج */
-$("loginBtn").onclick = async () => {
-  if (!configured) {
-    $("loginMsg").textContent = "لم يتم إعداد Firebase بعد.";
-    return;
-  }
-
-  try {
-    await signInWithEmailAndPassword(
-      auth,
-      $("email").value.trim(),
-      $("password").value
-    );
-  } catch (e) {
-    $("loginMsg").textContent =
-      "تعذر تسجيل الدخول. راجع البريد وكلمة المرور.";
-  }
-};
-
-$("logoutBtn").onclick = () => signOut(auth);
-
-/* تشغيل التطبيق */
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  });
+  `).join("");
 }
 
-if (configured) {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
+function openPurchaseForm() {
+  openModal(
+    "فاتورة مشتريات جديدة",
+    `
+      ${field("اسم المورد", "supplierName", "text", false)}
+      ${field("تاريخ الفاتورة", "date", "date", true, new Date().toISOString().slice(0, 10))}
 
-  onAuth
+      <div id="purchaseRows"></div>
+
+      <button type="button" class="primary" id="addPurchaseRowBtn">
+        + إضافة صنف
+      </button>
+
+      <div class="purchase-total">
+        إجمالي الفاتورة:
+        <strong id="purchaseTotal">${money(0)}</strong>
+      </div>
+
+      <button class="primary" type="submit">حفظ فاتورة المشتريات</button>
+    `,
+    async form => {
+      const rows = [...form.querySelectorAll(".purchase-row")];
+
+      if (!rows.length) {
+        throw new Error("أضف صنفًا واحدًا على الأقل");
+      }
+
+      const items = [];
+      const existingTotals = new Map();
+      const newProducts = [];
+
+      let total = 0;
+
+      for (const row of rows) {
+        const selectedId = row.querySelector(".purchase-product")?.value;
+        const qty = number(row.querySelector(".purchase-qty")?.value);
+        const unitCost = number(row.querySelector(".purchase-cost")?.value);
+
+        if (!selectedId) {
+          throw new Error("اختر منتجًا في كل صف");
+        }
+
+        if (!Number.isInteger(qty) || qty <= 0 || unitCost < 0) {
+          throw new Error("راجع الكمية وسعر الشراء");
+        }
+
+        const lineTotal = qty * unitCost;
+
+        if (selectedId === "__new__") {
+          const name = row.querySelector(".new-product-name")?.value.trim();
+          const code = row.querySelector(".new-product-code")?.value.trim() || "";
+          const category = row.querySelector(".new-product-category")?.value.trim() || "";
+          const salePrice = number(row.querySelector(".new-product-sale")?.value);
+
+          if (!name) {
+            throw new Error("اكتب اسم المنتج الجديد");
+          }
+
+          if (salePrice < 0) {
+            throw new Error("سعر البيع غير صحيح");
+          }
+
+          newProducts.push({
+            name,
+            code,
+            category,
+            salePrice,
+            qty,
+            unitCost,
+            lineTotal
+          });
+
+          items.push({
+            productId: null,
+            productName: name,
+            qty,
+            unitCost,
+            lineTotal,
+            isNewProduct: true
+          });
+        } else {
+          const product = products.find(item => item.id === selectedId);
+
+          if (!product) {
+            throw new Error("أحد المنتجات المختارة غير موجود");
+          }
+
+          const previous = existingTotals.get(selectedId) || {
+            qty: 0,
+            cost: 0,
+            product
+          };
+
+          previous.qty += qty;
+          previous.cost += lineTotal;
+
+          existingTotals.set(selectedId, previous);
+
+          items.push({
+            productId: selectedId,
+            productName: product.name,
+            qty,
+            unitCost,
+            lineTotal,
+            isNewProduct: false
+          });
+        }
+
+        total += lineTotal;
+      }
+
+      const supplierName = String(form.get("supplierName") || "").trim();
+      const date = form.get("date");
+
+      await runTransaction(db, async transaction => {
+        // All reads must happen before writes.
+        const snapshots = new Map();
+
+        for (const productId of existingTotals.keys()) {
+          const ref = getDocument("products", productId);
+          const snapshot = await transaction.get(ref);
+
+          if (!snapshot.exists()) {
+            throw new Error("أحد المنتجات لم يعد موجودًا");
+          }
+
+          snapshots.set(productId, snapshot);
+        }
+
+        const finalItems = [];
+
+        // Update existing products.
+        for (const [productId, entry] of existingTotals.entries()) {
+          const snapshot = snapshots.get(productId);
+          const oldData = snapshot.data();
+
+          const oldStock = number(oldData.stock);
+          const oldCost = number(oldData.purchasePrice);
+          const newStock = oldStock + entry.qty;
+
+          const averageCost = newStock > 0
+            ? ((oldStock * oldCost) + entry.cost) / newStock
+            : 0;
+
+          transaction.update(getDocument("products", productId), {
+            stock: newStock,
+            purchasePrice: averageCost,
+            updatedAt: serverTimestamp()
+          });
+        }
+
+        // Cr
